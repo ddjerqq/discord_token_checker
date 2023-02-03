@@ -1,3 +1,5 @@
+import os
+
 __all__ = (
     "STATUS",
     "BOT_TOKEN",
