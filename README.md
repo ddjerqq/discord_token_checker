@@ -1,2 +1,3 @@
-# discord_token_checker
-check discord token validity
+# discord token checker
+
+### please stop being a skid and pick up a book!!!
