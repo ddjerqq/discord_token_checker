@@ -1,69 +1,59 @@
 from __future__ import annotations
 import os
 import random
-
+import base64
 import aiohttp
-from aiohttp_socks import ProxyConnector
 import asyncio as aio
 from ua import signed_header
 from rgbprint import gradient_print
+from aiohttp_socks import ProxyConnector
+
+from src import *
 
 
-STATUS = {
-    200: (lambda token: gradient_print(f"[VALID] {token}", start_color="green", end_color="cyan"), True),
-    400: (lambda token: gradient_print(f"[BAD REQUEST] {token}", start_color="red", end_color="pink"), False),
-    401: (lambda token: gradient_print(f"[INVALID] {token}", start_color="red", end_color="green"), False),
-    403: (lambda token: gradient_print(f"[LOCKED] {token}", start_color="blue", end_color="red"), False),
-}
-
-
-PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHECK_URL = f"https://discord.com/api/v8/users/@me"
-TOKENS = [
-    line.strip()
-    for line in open(os.path.join(PATH, "tokens.txt"))
-    if not line.startswith("#")
-]
-PROXIES = [
-    f"http://{line.strip()}"
-    for line in open(os.path.join(PATH, "proxy.txt"))
-    if not line.startswith("#")
-]
+def decode_token(token: str) -> int | None:
+    try:
+        token = token.strip()
+        token = token.split(".")[0]
+        id = base64.b64decode(token)
+        id = id.decode()
+        return int(id)
+    except:
+        return None
 
 
 async def check(token: str) -> bool:
-    if PROXIES:
-        connector = ProxyConnector.from_url(random.choice(PROXIES))
-    else:
-        connector = None
-    
+    connector = ProxyConnector.from_url(random.choice(PROXIES)) if PROXIES else None
     async with aiohttp.ClientSession(connector=connector) as sesh:
-        try:
+        status = None
+        username = None
+        valid = False
+
+        async with sesh.get(
+            CHECK_URL, 
+            headers=signed_header(token),
+        ) as resp:
+            status = STATUS.get(resp.status, resp.status)
+            valid = resp.status == 200
+
+        if BOT_TOKEN is not None and (id := decode_token(token)) is not None:
             async with sesh.get(
-                CHECK_URL, 
-                headers=signed_header(token),
-                timeout=15,
+                ID_URL.format(id),
+                headers=signed_header(token, authorization=f"Bot {BOT_TOKEN}")
             ) as resp:
-                status, valid = STATUS.get(resp.status, (None, None))
+                data = await resp.json()
+                id = data.get("id")
+                name = data.get("username")
+                discriminator = data.get("discriminator")
+                username = f"({id}) {name}#{discriminator}"
+        
+    gradient_print(
+        f"[{status}] {username} {token}", 
+        start_color="red", 
+        end_color="yellow"
+    )
 
-                if status is not None and valid is not None:
-                    status(token)
-                    return valid
-
-                else:
-                    gradient_print(
-                        f"[UNKNOWN STATUS CODE] {token} {resp.status}", 
-                        start_color="red", 
-                        end_color="yellow"
-                    )
-        except Exception as e:
-            gradient_print(
-                f"[UNKNOWN ERROR] {token} {e}",
-                start_color="red", 
-                end_color="yellow"
-            )
-        finally:
-            return False
+    return valid
 
 
 async def main():
@@ -71,7 +61,7 @@ async def main():
         check(token)
         for token in TOKENS
     ]
-    valids = await aio.gather(*futures)
+    valids = await aio.gather(*futures, return_exceptions=True)
     good = [
         token
         for valid, token in zip(valids, TOKENS)
